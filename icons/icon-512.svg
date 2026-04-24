@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="72" fill="#0d6efd"/>
+  <rect x="48" y="48" width="416" height="416" rx="56" fill="#0b5ed7"/>
+  <text x="256" y="200" font-size="72" text-anchor="middle" fill="rgba(255,255,255,0.7)" font-family="sans-serif" font-weight="700">MITRA</text>
+  <text x="256" y="310" font-size="112" text-anchor="middle" fill="white" font-family="sans-serif" font-weight="800">DASH</text>
+  <rect x="100" y="340" width="312" height="10" rx="5" fill="rgba(255,255,255,0.35)"/>
+  <text x="256" y="415" font-size="44" text-anchor="middle" fill="rgba(255,255,255,0.65)" font-family="sans-serif">Field Force</text>
+</svg>

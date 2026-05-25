@@ -151,10 +151,14 @@ async function flushOfflineQueue() {
     try {
       const response = await fetch(GAS_URL, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: item.action, args: item.args })
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: JSON.stringify({ action: item.action, args: item.args }),
+        redirect: 'follow'
       });
-      const result = await response.json();
+      const text = await response.text();
+      let result;
+      try { result = JSON.parse(text); }
+      catch(e) { throw new Error('Invalid JSON response'); }
       if (result.success) {
         console.log('[SW] Sync sukses:', item.id, item.action);
         // Notifikasi ke semua client

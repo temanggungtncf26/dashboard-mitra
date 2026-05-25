@@ -740,18 +740,30 @@
           }
 
           var controller = new AbortController();
-          var timeout = setTimeout(function() { controller.abort(); }, 20000);
+          var timeout = setTimeout(function() { controller.abort(); }, 25000);
 
+          // ✅ FIX CORS: GAS hanya menerima simple request tanpa preflight.
+          // Gunakan Content-Type: text/plain agar browser TIDAK mengirim
+          // preflight OPTIONS request yang diblokir GAS.
           fetch(GAS_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
             body: JSON.stringify({ action: funcName, args: args }),
+            redirect: 'follow',
             signal: controller.signal
           })
           .then(function(response) {
             clearTimeout(timeout);
+            // GAS kadang redirect sebelum response — ikuti redirect
             if (!response.ok) throw new Error('HTTP ' + response.status);
-            return response.json();
+            return response.text();
+          })
+          .then(function(text) {
+            try {
+              return JSON.parse(text);
+            } catch(e) {
+              throw new Error('Response bukan JSON: ' + text.substring(0, 100));
+            }
           })
           .then(resolve)
           .catch(function(err) {
@@ -908,8 +920,9 @@
         if (token && navigator.onLine) {
           fetch(GAS_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'destroySession', args: [token] })
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'destroySession', args: [token] }),
+            redirect: 'follow'
           }).catch(function() {});
         }
         Auth.clear();
@@ -2069,10 +2082,15 @@ window.exportKegiatanExcel = function() {
 
           fetch(GAS_URL, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'loginUser', args: [u, p] })
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify({ action: 'loginUser', args: [u, p] }),
+            redirect: 'follow'
           })
-          .then(function(r) { return r.json(); })
+          .then(function(r) { return r.text(); })
+          .then(function(text) {
+            try { return JSON.parse(text); }
+            catch(e) { throw new Error('Response tidak valid dari server'); }
+          })
           .then(function(res) {
             hideFullPageLoading();
             if (res.success) {
@@ -2640,10 +2658,15 @@ window.exportKegiatanExcel = function() {
           chain = chain.then(function() {
             return fetch(GAS_URL, {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ action: item.action, args: item.args })
+              headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+              body: JSON.stringify({ action: item.action, args: item.args }),
+              redirect: 'follow'
             })
-            .then(function(r) { return r.json(); })
+            .then(function(r) { return r.text(); })
+            .then(function(text) {
+              try { return JSON.parse(text); }
+              catch(e) { throw new Error('Invalid JSON'); }
+            })
             .then(function(res) {
               if (res.success) {
                 successes++;

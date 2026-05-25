@@ -3,7 +3,7 @@
 // v1.0.0 | Cache First + Background Sync + Offline Queue
 // ============================================================
 
-const CACHE_NAME = 'mitra-dash-v1.0.0';
+const CACHE_NAME = 'mitra-dash-v1.1.0'; // bumped: offline queue fix
 const SYNC_TAG   = 'sync-mitra-dash-queue';
 
 // Aset statis yang di-cache saat install
@@ -148,6 +148,7 @@ async function flushOfflineQueue() {
   const failed  = [];
 
   for (const item of queue) {
+    let success = false;
     try {
       const response = await fetch(GAS_URL, {
         method: 'POST',
@@ -155,18 +156,40 @@ async function flushOfflineQueue() {
         body: JSON.stringify({ action: item.action, args: item.args }),
         redirect: 'follow'
       });
-      const text = await response.text();
-      let result;
-      try { result = JSON.parse(text); }
-      catch(e) { throw new Error('Invalid JSON response'); }
-      if (result.success) {
+
+      // Jika response tidak ok (mis. 5xx) → masuk failed
+      if (!response.ok) {
+        console.warn('[SW] Sync HTTP error:', response.status, item.action);
+        failed.push(item);
+        continue;
+      }
+
+      let result = null;
+      try {
+        const text = await response.text();
+        result = JSON.parse(text);
+      } catch(parseErr) {
+        // GAS kadang return HTML redirect atau bukan JSON (CORS opaque)
+        // Jika status 200 tapi bukan JSON, anggap berhasil (optimistic)
+        // agar tidak terus retry selamanya
+        console.warn('[SW] Response non-JSON tapi status 200, anggap sukses:', item.action);
+        success = true;
+      }
+
+      if (result !== null) {
+        success = result.success === true;
+        if (!success) {
+          console.warn('[SW] Sync gagal (server):', item.action, result.message);
+        }
+      }
+
+      if (success) {
         console.log('[SW] Sync sukses:', item.id, item.action);
-        // Notifikasi ke semua client
         await notifyClients({ type: 'SYNC_SUCCESS', item: item });
       } else {
-        console.warn('[SW] Sync gagal (server):', item.action, result.message);
         failed.push(item);
       }
+
     } catch (err) {
       console.warn('[SW] Sync gagal (network):', item.action, err.message);
       failed.push(item);

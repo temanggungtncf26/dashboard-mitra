@@ -750,19 +750,16 @@
           }
 
           // 2) Online → coba kirim ke GAS dengan timeout 20 detik
-          var aborted = false;
-          var timedOut = false;
+          var done = false; // flag agar resolve/reject hanya dipanggil sekali
           var timeoutId = setTimeout(function() {
-            timedOut = true;
             _handleGasFail(new Error('Request timeout (20s)'));
           }, 20000);
 
           function _handleGasFail(err) {
-            if (aborted) return;
-            aborted = true;
+            if (done) return;
+            done = true;
             clearTimeout(timeoutId);
             if (_isWriteAction(funcName)) {
-              // Write action gagal → queue lokal, jangan tampilkan error ke user
               console.warn('[gasRun] Write action gagal, masuk offline queue:', funcName, err.message);
               window.OfflineQueue.enqueue(funcName, args)
                 .then(function() {
@@ -774,28 +771,34 @@
                 })
                 .catch(reject);
             } else {
-              // Read action gagal → lempar error agar UI tampilkan tombol "Coba lagi"
               reject(err);
             }
           }
 
-          // Gunakan XMLHttpRequest agar bisa di-abort dan kompatibel luas
+          function _handleGasSuccess(parsed) {
+            if (done) return;
+            done = true;
+            clearTimeout(timeoutId);
+            resolve(parsed);
+          }
+
+          // Gunakan XMLHttpRequest — lebih deterministik daripada fetch() untuk kasus CORS/offline
           var xhr = new XMLHttpRequest();
           xhr.open('POST', GAS_URL, true);
           xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
           xhr.timeout = 20000;
 
           xhr.onload = function() {
-            if (aborted || timedOut) return;
-            clearTimeout(timeoutId);
-            aborted = true;
+            // Status 0 = jaringan gagal (offline, CORS block, network error)
+            if (xhr.status === 0) {
+              _handleGasFail(new Error('Tidak dapat terhubung ke server'));
+              return;
+            }
             if (xhr.status >= 200 && xhr.status < 300) {
               try {
                 var parsed = JSON.parse(xhr.responseText);
-                resolve(parsed);
+                _handleGasSuccess(parsed);
               } catch(e) {
-                // Response tidak valid JSON — bisa jadi GAS redirect HTML
-                // Perlakukan sebagai failure
                 _handleGasFail(new Error('Response tidak valid dari server'));
               }
             } else {
@@ -809,10 +812,6 @@
 
           xhr.ontimeout = function() {
             _handleGasFail(new Error('Request timeout'));
-          };
-
-          xhr.onabort = function() {
-            // Diabort dari luar (tidak umum), abaikan
           };
 
           try {
@@ -2538,27 +2537,23 @@ window.exportKegiatanExcel = function() {
               })
               .catch(function(err) {
                 Swal.close();
-                // Jika error terjadi saat catch (bukan dari gasRun resolve),
-                // berarti ada kesalahan tak terduga — coba queue manual
-                if (_isWriteAction('saveVerifVarietas')) {
-                  window.OfflineQueue.enqueue('saveVerifVarietas', [Auth.getToken(), payload])
-                    .then(function() {
-                      Swal.fire({
-                        icon: 'warning',
-                        title: 'Tersimpan di Perangkat',
-                        html: 'Terjadi kesalahan tak terduga.<br><small class="text-muted">Data verifikasi <strong>disimpan lokal</strong> dan akan dikirim otomatis saat koneksi pulih.</small>',
-                        confirmButtonText: 'OK'
-                      });
-                      var modalEl = document.getElementById('verifModal');
-                      var modalInstance = bootstrap.Modal.getInstance(modalEl);
-                      if (modalInstance) modalInstance.hide();
-                    })
-                    .catch(function() {
-                      Swal.fire('Error', 'Gagal menyimpan data: ' + err.message, 'error');
+                // Safety net: gasRun sudah seharusnya menangani semua error via queue.
+                // Jika sampai sini, queue manual sebagai last resort.
+                window.OfflineQueue.enqueue('saveVerifVarietas', [Auth.getToken(), payload])
+                  .then(function() {
+                    Swal.fire({
+                      icon: 'warning',
+                      title: 'Tersimpan di Perangkat',
+                      html: 'Data verifikasi <strong>disimpan lokal</strong> dan akan dikirim otomatis saat koneksi pulih.',
+                      confirmButtonText: 'OK'
                     });
-                } else {
-                  Swal.fire('Error Server', err.message, 'error');
-                }
+                    var modalEl = document.getElementById('verifModal');
+                    var modalInstance = bootstrap.Modal.getInstance(modalEl);
+                    if (modalInstance) modalInstance.hide();
+                  })
+                  .catch(function() {
+                    Swal.fire('Error', 'Gagal menyimpan data: ' + err.message, 'error');
+                  });
               });
           });
         }

@@ -1,6 +1,8 @@
-# MITRA-DASH PWA
-**Dashboard Kinerja Field Force & Trader — TNCF Temanggung**  
-Converted from Google Apps Script Web App → Progressive Web App (PWA)
+# MITRA-DASH PWA — Panduan Deployment
+
+> **Converted by:** Gas-to-PWA Converter  
+> **Versi:** 1.0.0  
+> **Teknologi:** HTML5, CSS3, Vanilla JS, Service Worker, IndexedDB, Background Sync
 
 ---
 
@@ -8,12 +10,12 @@ Converted from Google Apps Script Web App → Progressive Web App (PWA)
 
 ```
 mitra-dash-pwa/
-├── index.html          ← UI utama (sudah dikonversi dari GAS)
-├── manifest.json       ← Konfigurasi PWA
+├── index.html          ← App utama (semua UI + logic)
+├── manifest.json       ← Konfigurasi PWA (nama, ikon, warna)
 ├── sw.js               ← Service Worker (Cache First + Background Sync)
 ├── icons/
-│   ├── icon-192.svg    ← Placeholder icon (ganti dengan logo asli)
-│   └── icon-512.svg    ← Placeholder icon (ganti dengan logo asli)
+│   ├── icon-192.svg    ← Ikon app 192×192 (placeholder, bisa diganti)
+│   └── icon-512.svg    ← Ikon app 512×512 (placeholder, bisa diganti)
 └── README.md           ← File ini
 ```
 
@@ -21,131 +23,159 @@ mitra-dash-pwa/
 
 ## 🚀 Cara Deploy
 
-### Opsi 1 — GitHub Pages (Gratis, Direkomendasikan)
+### Opsi A: GitHub Pages (Gratis, Direkomendasikan)
 
 1. Buat repository baru di GitHub (misal: `mitra-dash`)
-2. Upload semua file ke repository tersebut
-3. Masuk ke **Settings → Pages → Source: Deploy from a branch → main / root**
-4. Akses di: `https://username.github.io/mitra-dash/`
+2. Upload semua file dari folder ini ke repository
+3. Masuk ke **Settings → Pages**
+4. Set **Source** ke `main` branch, folder `/ (root)`
+5. App akan tersedia di `https://[username].github.io/mitra-dash/`
 
-### Opsi 2 — Netlify (Drag & Drop)
+### Opsi B: Netlify (Drag & Drop)
 
-1. Buka [netlify.com](https://netlify.com) → Login
-2. Drag & drop **folder** `mitra-dash-pwa` ke dashboard Netlify
-3. Netlify otomatis memberikan URL seperti `https://mitra-dash-xxx.netlify.app`
+1. Buka [netlify.com](https://netlify.com) → **Add new site → Deploy manually**
+2. Drag & drop seluruh folder `mitra-dash-pwa/` ke area upload
+3. Netlify akan langsung memberikan URL HTTPS
 
-### Opsi 3 — Web Server Biasa
+### Opsi C: Vercel
 
-Upload semua file ke hosting dengan struktur seperti di atas. Pastikan server mendukung HTTPS (PWA **wajib** HTTPS).
+```bash
+npm install -g vercel
+cd mitra-dash-pwa
+vercel --prod
+```
+
+> ⚠️ **PENTING:** PWA **harus dihosting di HTTPS** agar Service Worker dan Install Prompt berfungsi.  
+> Semua platform di atas sudah otomatis HTTPS.
 
 ---
 
-## 🧪 Cara Test PWA
+## 🔧 Cara Test PWA di Chrome
 
-1. Buka URL di **Chrome** (desktop atau Android)
-2. Buka **DevTools** (F12) → Tab **Application**
-3. Cek:
-   - **Service Workers** → Status: `activated and is running`
-   - **Cache Storage** → `mitra-dash-v1.0.0` → berisi file-file statis
-   - **Manifest** → Semua field valid, ikon terdeteksi
-
-### Test Install
-- Di Chrome Android: akan muncul banner "Tambahkan ke layar utama"
-- Di Chrome Desktop: ikon install (⊕) muncul di address bar
-
-### Test Offline
-1. Di DevTools → **Network → Throttling: Offline**
-2. Refresh halaman → App harus tetap tampil (dari cache)
-3. Koneksi kembali → banner "Koneksi Kembali" muncul
+1. Buka app di Chrome
+2. Tekan `F12` → tab **Application**
+3. Cek **Service Workers** — harus ada status `activated and running`
+4. Cek **Manifest** — harus muncul nama dan ikon
+5. Cek **Storage → IndexedDB → mitra-dash-db** — antrian offline tersimpan di sini
 
 ---
 
-## 🖼️ Cara Ganti Icon
+## 📱 Cara Install di Device
 
-Icon saat ini adalah placeholder SVG dengan teks "MITRA-DASH". Untuk mengganti:
+### Android (Chrome)
+- Buka app → muncul banner **"Tambahkan ke layar utama"** atau
+- Ketuk icon titik tiga → **Install app**
+- Atau ketuk tombol **"Install App"** yang muncul di halaman
 
-1. Siapkan file PNG/SVG logo Anda dalam dua ukuran:
-   - `icon-192.png` (192×192 px)
-   - `icon-512.png` (512×512 px)
-2. Letakkan di folder `icons/`
-3. Edit `manifest.json`, ubah bagian `icons`:
-   ```json
-   "icons": [
-     { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },
-     { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
-   ]
-   ```
-4. Di `index.html`, ubah baris:
-   ```html
-   <link rel="apple-touch-icon" href="icons/icon-192.svg">
-   ```
-   menjadi:
-   ```html
-   <link rel="apple-touch-icon" href="icons/icon-192.png">
-   ```
+### iPhone / iPad (Safari)
+- Buka app di Safari
+- Ketuk ikon **Share** (kotak dengan panah ke atas)
+- Pilih **"Add to Home Screen"**
+- Ketuk **Add**
+
+> ⚠️ **iOS Note:** Background Sync tidak didukung di iOS. Sinkronisasi dilakukan secara otomatis saat app dibuka kembali dan perangkat sudah online.
 
 ---
 
-## ⚙️ Konfigurasi GAS
+## 🖼️ Cara Mengganti Ikon
 
-GAS URL yang digunakan:
-```
-https://script.google.com/macros/s/AKfycbw-4qhpEP-4L050wX4IclvaFiPRvgo5Y09ukaZxi8dce1No3iW50pFKRYOLtBzqSByQ/exec
-```
+File `icons/icon-192.svg` dan `icons/icon-512.svg` adalah placeholder.  
+Ganti dengan logo asli aplikasi:
 
-### Penting: Konfigurasi GAS untuk CORS
-Pastikan deployment GAS Anda:
-- **Execute as**: Me (your Google account)
-- **Who has access**: Anyone
+1. **Format yang direkomendasikan:** PNG (transparan background) atau SVG
+2. **Ukuran:** 192×192px dan 512×512px
+3. Update `manifest.json` jika menggunakan PNG:
 
-Semua request dari PWA dikirim via `fetch()` GET/POST ke URL di atas. Pastikan fungsi-fungsi berikut tersedia di GAS:
-- `loginUser(username, password)`
-- `destroySession(token)`
-- `getDashboardUtama(token)`
-- `getDashboardKegiatan(token, periode)`
-- `getUsers(token)`
-- `saveUser(token, payload)`
-- `deleteUser(token, username)`
-- `getDaftarPetaniLahan(token, filterTrader)`
-- `getDashboardPertanaman(token)`
-
-### Parameter Request
-GET request menggunakan query string:
-```
-?action=funcName&arg0=token&arg1=extraParam
+```json
+"icons": [
+  {
+    "src": "icons/icon-192.png",
+    "sizes": "192x192",
+    "type": "image/png",
+    "purpose": "any maskable"
+  },
+  {
+    "src": "icons/icon-512.png",
+    "sizes": "512x512",
+    "type": "image/png",
+    "purpose": "any maskable"
+  }
+]
 ```
 
-POST request (untuk saveUser, deleteUser) menggunakan form-encoded:
+4. Tambahkan juga untuk iOS di `index.html`:
+```html
+<link rel="apple-touch-icon" href="icons/icon-192.png">
 ```
-action=saveUser&payload={"token":"...","payload":{...}}
-```
-
-> **Catatan**: Pastikan `doPost(e)` di `kode.gs` Anda menangani parameter `e.parameter.action` dan `e.parameter.payload`.
 
 ---
 
-## 📱 Catatan Kompatibilitas
+## 🔑 Fitur PWA yang Diimplementasikan
 
-| Fitur | Chrome Android | Chrome Desktop | Safari iOS | Firefox |
-|-------|---------------|----------------|------------|---------|
-| Install (A2HS) | ✅ | ✅ | ✅ (manual) | ⚠️ |
-| Service Worker | ✅ | ✅ | ✅ | ✅ |
-| Cache Offline | ✅ | ✅ | ✅ | ✅ |
-| Background Sync | ✅ | ✅ | ❌ (fallback ke online event) | ❌ |
-| Push Notif | ✅ | ✅ | ✅ (iOS 16.4+) | ✅ |
-
-**iOS Notes**: iOS tidak mendukung Background Sync API. App ini menggunakan `window.addEventListener('online')` sebagai fallback otomatis.
+| Fitur | Status | Keterangan |
+|-------|--------|------------|
+| Install ke device | ✅ | Banner dan tombol install native |
+| Session persisten | ✅ | Login tersimpan di localStorage, tidak logout saat app ditutup |
+| Logout manual saja | ✅ | User hanya keluar saat klik tombol Logout |
+| Offline indicator | ✅ | Banner merah di bawah saat offline |
+| Input offline | ✅ | Form `saveVerifVarietas`, `saveUser`, `deleteUser` tersimpan di antrian |
+| Auto-sync saat online | ✅ | Background Sync (Android/Chrome) + fallback manual (iOS) |
+| Cache static assets | ✅ | HTML, CSS, JS, font di-cache oleh Service Worker |
+| Notifikasi sync | ✅ | SweetAlert2 toast saat data berhasil tersinkronisasi |
 
 ---
 
-## 🔄 Update Versi Cache
+## 🌐 Konfigurasi GAS (Google Apps Script)
 
-Setiap kali ada perubahan file statis, update versi cache di `sw.js`:
-```javascript
-const CACHE_NAME = 'mitra-dash-v1.0.1'; // naikkan versi
+**GAS URL** yang digunakan:
 ```
-App akan otomatis mendeteksi update dan menampilkan notifikasi kepada user.
+https://script.google.com/macros/s/AKfycbyJ5vIZ6ZU-VPzevgpL763kpcBldo1L9N0jlksYPkl4j90hH80AHLnWN25v-_lRJi8l/exec
+```
+
+Pastikan GAS deployment dikonfigurasi:
+- **Execute as:** Me
+- **Who has access:** Anyone
+
+Fungsi `doPost()` di `kode.gs` sudah disiapkan untuk menerima request dari PWA.
 
 ---
 
-*Generated by TNCF TEMANGGUNG — GAS-to-PWA Converter*
+## 🔄 Alur Offline Sync
+
+```
+User input form (offline)
+    ↓
+Data masuk IndexedDB (mitra-dash-db)
+    ↓
+Badge antrian muncul di topbar
+    ↓
+Koneksi kembali online
+    ↓
+Background Sync (Android) atau window.online event (iOS)
+    ↓
+Flush antrian → kirim ke GAS satu per satu
+    ↓
+Notifikasi sukses di app
+```
+
+---
+
+## 🐛 Troubleshooting
+
+**Service Worker tidak aktif:**
+- Pastikan file di-host via HTTPS
+- Di Chrome DevTools → Application → Service Workers → klik "Update"
+
+**Install prompt tidak muncul:**
+- Pastikan `manifest.json` valid dan bisa diakses
+- Cek tidak ada error di console browser
+- Coba di Chrome incognito
+
+**Data tidak tersinkronisasi:**
+- Buka DevTools → Application → IndexedDB → mitra-dash-db → offline_queue
+- Cek apakah ada item di sana
+- Pastikan GAS URL masih valid dan accessible
+
+---
+
+*MITRA-DASH PWA v1.0 — TNCF Temanggung | @rochmadjeka*

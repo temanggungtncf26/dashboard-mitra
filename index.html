@@ -2162,68 +2162,120 @@ window.exportKegiatanExcel = function() {
         var cacheKey = 'verif_' + currentFilter;
         showSectionLoading('containerVerif');
 
-        // Jika offline, langsung load dari cache IndexedDB
-        if (!_isActuallyOnline) {
+        // Helper: tampilkan data dari cache IndexedDB
+        function _showFromCache(reason) {
           window.OfflineQueue.cacheGet(cacheKey).then(function(cached) {
             if (activePage !== requestedPage) return;
             if (cached && cached.data && cached.data.length > 0) {
               isVerifLoaded = true;
               rawVerifData = cached.data;
               window.renderVerifVarietas('');
-              // Tampilkan banner info data dari cache
+              // Banner info cache
               var container = document.getElementById('containerVerif');
-              var banner = document.createElement('div');
               var savedAt = cached.savedAt ? new Date(cached.savedAt).toLocaleString('id-ID') : '-';
-              banner.className = 'alert alert-warning border-0 rounded-3 mb-3 d-flex align-items-center gap-2';
-              banner.innerHTML = '<i class="fa-solid fa-database"></i><span><strong>Data Cache</strong> — Menampilkan data tersimpan terakhir (<em>' + savedAt + '</em>). Input tetap bisa dilakukan dan akan tersinkronisasi saat online.</span>';
-              container.insertAdjacentElement('afterbegin', banner);
+              var bannerDiv = document.createElement('div');
+              bannerDiv.className = 'alert alert-warning border-0 rounded-3 mb-3 d-flex align-items-center gap-2 shadow-sm';
+              bannerDiv.innerHTML =
+                '<i class="fa-solid fa-database fa-lg text-warning"></i>' +
+                '<div><strong>Mode Offline — Data Cache</strong><br>' +
+                '<small class="text-muted">' + reason + ' Data tersimpan terakhir: <em>' + savedAt + '</em>.<br>' +
+                'Input verifikasi tetap bisa dilakukan dan akan dikirim otomatis saat online.</small></div>';
+              container.insertAdjacentElement('afterbegin', bannerDiv);
             } else {
+              // Belum pernah ada cache sama sekali
               document.getElementById('containerVerif').innerHTML =
-                '<div class="text-center py-5 text-warning"><i class="fa-solid fa-wifi-slash fa-2x mb-3"></i><p class="mb-1 fw-bold">Mode Offline — Belum Ada Cache</p><p class="text-muted small">Buka halaman ini saat online minimal sekali agar data tersimpan lokal.</p></div>';
+                '<div class="text-center py-5">' +
+                '<i class="fa-solid fa-wifi-slash fa-2x mb-3 text-warning"></i>' +
+                '<p class="fw-bold mb-1">Tidak Ada Koneksi & Belum Ada Cache</p>' +
+                '<p class="text-muted small mb-3">Buka halaman ini minimal sekali saat online agar data tersimpan lokal untuk akses offline.</p>' +
+                '<a href="#" class="btn btn-sm btn-outline-warning" onclick="window.fetchVerifVarietas()"><i class="fa-solid fa-rotate-right me-1"></i>Coba Lagi</a>' +
+                '</div>';
             }
           }).catch(function() {
+            if (activePage !== requestedPage) return;
             document.getElementById('containerVerif').innerHTML =
-              '<div class="text-center py-5 text-warning"><i class="fa-solid fa-wifi-slash fa-2x mb-3"></i><p class="mb-1 fw-bold">Mode Offline</p><p class="text-muted small">Tidak dapat memuat data cache.</p></div>';
+              '<div class="text-center py-5 text-warning">' +
+              '<i class="fa-solid fa-wifi-slash fa-2x mb-3"></i>' +
+              '<p class="fw-bold">Mode Offline</p>' +
+              '<p class="text-muted small">Tidak dapat memuat data.</p>' +
+              '</div>';
           });
-          return;
         }
 
-        gasRun('getVerifVarietas', Auth.getToken(), currentFilter)
-          .then(function(res) {
-            if (handleSessionExpired(res)) return;
+        // Strategi: selalu coba XHR ke server dulu (tidak bergantung pada flag _isActuallyOnline)
+        // Jika berhasil → tampilkan + simpan ke cache
+        // Jika gagal (apapun alasannya) → fallback ke cache
+        var done = false;
+        var timeoutId = setTimeout(function() {
+          if (!done) { done = true; _showFromCache('Server tidak merespons (timeout). '); }
+        }, 12000);
+
+        var xhr = new XMLHttpRequest();
+        xhr.open('POST', GAS_URL, true);
+        xhr.setRequestHeader('Content-Type', 'text/plain;charset=utf-8');
+        xhr.timeout = 12000;
+
+        xhr.onload = function() {
+          if (done) return;
+          clearTimeout(timeoutId);
+
+          if (xhr.status === 0 || xhr.status >= 400) {
+            done = true;
+            _setConnectionUI(false);
+            _showFromCache('Server tidak dapat dijangkau. ');
+            return;
+          }
+
+          if (xhr.status >= 200 && xhr.status < 400) {
+            var res;
+            try { res = JSON.parse(xhr.responseText); }
+            catch(e) { done = true; _showFromCache('Response server tidak valid. '); return; }
+
+            done = true;
             if (activePage !== requestedPage) return;
-            if (!res.success) throw new Error(res.message);
-            
-            isVerifLoaded = true;
-            rawVerifData = res.data;
-            // Simpan ke cache IndexedDB untuk akses offline nanti
-            window.OfflineQueue.cacheSet(cacheKey, { data: res.data, savedAt: Date.now() });
-            if (typeof renderFilterDropdown === 'function') renderFilterDropdown('filterTraderVerif', res.role, res.traders || [], currentFilter);
-            window.renderVerifVarietas(res.data);
-          })
-          .catch(function(err) {
-            if (activePage !== requestedPage) return;
-            // Coba fallback ke cache jika fetch gagal
-            window.OfflineQueue.cacheGet(cacheKey).then(function(cached) {
-              if (cached && cached.data && cached.data.length > 0) {
-                isVerifLoaded = true;
-                rawVerifData = cached.data;
-                window.renderVerifVarietas('');
-                var container = document.getElementById('containerVerif');
-                var savedAt = cached.savedAt ? new Date(cached.savedAt).toLocaleString('id-ID') : '-';
-                var banner = document.createElement('div');
-                banner.className = 'alert alert-warning border-0 rounded-3 mb-3 d-flex align-items-center gap-2';
-                banner.innerHTML = '<i class="fa-solid fa-database"></i><span><strong>Data Cache</strong> — Server tidak dapat dijangkau. Menampilkan data tersimpan terakhir (<em>' + savedAt + '</em>).</span>';
-                container.insertAdjacentElement('afterbegin', banner);
-              } else {
-                document.getElementById('containerVerif').innerHTML = 
-                  '<div class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-3"></i><p class="mb-1 fw-bold">Gagal memuat data verifikasi.</p><code class="d-block mb-3 p-2 bg-danger bg-opacity-10 text-danger rounded">' + err.message + '</code><a href="#" class="btn btn-sm btn-outline-danger" onclick="window.fetchVerifVarietas()">Coba lagi</a></div>';
+
+            if (res.sessionExpired) { Auth.clear(); window.logout(); return; }
+
+            if (res.success) {
+              // Pastikan status UI online
+              _setConnectionUI(true);
+              isVerifLoaded = true;
+              rawVerifData = res.data;
+              // Simpan ke cache untuk akses offline berikutnya
+              window.OfflineQueue.cacheSet(cacheKey, { data: res.data, savedAt: Date.now() });
+              if (typeof renderFilterDropdown === 'function') {
+                renderFilterDropdown('filterTraderVerif', res.role, res.traders || [], currentFilter);
               }
-            }).catch(function() {
-              document.getElementById('containerVerif').innerHTML = 
-                '<div class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-3"></i><p class="mb-1 fw-bold">Gagal memuat data verifikasi.</p><code class="d-block mb-3 p-2 bg-danger bg-opacity-10 text-danger rounded">' + err.message + '</code><a href="#" class="btn btn-sm btn-outline-danger" onclick="window.fetchVerifVarietas()">Coba lagi</a></div>';
-            });
-          });
+              window.renderVerifVarietas('');
+            } else {
+              _showFromCache('Server menolak permintaan: ' + (res.message || '') + '. ');
+            }
+          }
+        };
+
+        xhr.onerror = function() {
+          if (done) return;
+          done = true;
+          clearTimeout(timeoutId);
+          _setConnectionUI(false);
+          _showFromCache('Koneksi jaringan terputus. ');
+        };
+
+        xhr.ontimeout = function() {
+          if (done) return;
+          done = true;
+          clearTimeout(timeoutId);
+          _setConnectionUI(false);
+          _showFromCache('Server tidak merespons (timeout). ');
+        };
+
+        try {
+          xhr.send(JSON.stringify({ action: 'getVerifVarietas', args: [Auth.getToken(), currentFilter] }));
+        } catch(e) {
+          done = true;
+          clearTimeout(timeoutId);
+          _showFromCache('Gagal mengirim permintaan. ');
+        }
       };
 
       window.renderVerifVarietas = function(searchTerm) {
@@ -2839,24 +2891,24 @@ window.exportKegiatanExcel = function() {
     }
   }
 
-  // Ping aktif ke GAS URL untuk verifikasi koneksi sesungguhnya
-  // Menggunakan HEAD ke URL kecil (favicon google) agar cepat & tidak tergantung GAS
+  // Ping aktif: coba load favicon Google yang sangat kecil
+  // onload = online, onerror/timeout = offline (tidak bergantung navigator.onLine)
   function _pingCheck(callback) {
-    var img = new Image();
     var done = false;
     var timer = setTimeout(function() {
       if (!done) { done = true; callback(false); }
-    }, 5000);
-    img.onload = function() {
-      if (!done) { done = true; clearTimeout(timer); callback(true); }
-    };
-    img.onerror = function() {
-      // onerror bisa berarti koneksi ada (CORS blocked) atau memang offline
-      // Jika navigator.onLine false → offline pasti; jika true → ada koneksi
-      if (!done) { done = true; clearTimeout(timer); callback(navigator.onLine); }
-    };
-    // Ping ke google favicon (sangat ringan, no CORS issue)
-    img.src = 'https://www.google.com/favicon.ico?_=' + Date.now();
+    }, 4000);
+
+    // Gunakan fetch no-store agar tidak kena cache browser
+    fetch('https://www.google.com/favicon.ico', { method: 'HEAD', mode: 'no-cors', cache: 'no-store' })
+      .then(function() {
+        // fetch berhasil (bahkan mode no-cors return opaque response = tetap resolve)
+        if (!done) { done = true; clearTimeout(timer); callback(true); }
+      })
+      .catch(function() {
+        // fetch gagal = benar-benar tidak ada koneksi
+        if (!done) { done = true; clearTimeout(timer); callback(false); }
+      });
   }
 
   // Cek koneksi secara periodik setiap 10 detik

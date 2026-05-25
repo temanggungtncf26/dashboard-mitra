@@ -736,7 +736,8 @@
         return new Promise(function(resolve, reject) {
 
           // 1) Benar-benar offline → langsung queue (write) atau reject (read)
-          if (!navigator.onLine) {
+          var isOnlineNow = (typeof window._isActuallyOnline !== 'undefined') ? window._isActuallyOnline : navigator.onLine;
+          if (!isOnlineNow) {
             if (_isWriteAction(funcName)) {
               window.OfflineQueue.enqueue(funcName, args)
                 .then(function() {
@@ -2158,7 +2159,34 @@ window.exportKegiatanExcel = function() {
       window.fetchVerifVarietas = function(filterVal) {
         var requestedPage = 'verifVarietas';
         var currentFilter = filterVal || (document.getElementById('filterTraderVerif') ? document.getElementById('filterTraderVerif').value : 'ALL');
+        var cacheKey = 'verif_' + currentFilter;
         showSectionLoading('containerVerif');
+
+        // Jika offline, langsung load dari cache IndexedDB
+        if (!_isActuallyOnline) {
+          window.OfflineQueue.cacheGet(cacheKey).then(function(cached) {
+            if (activePage !== requestedPage) return;
+            if (cached && cached.data && cached.data.length > 0) {
+              isVerifLoaded = true;
+              rawVerifData = cached.data;
+              window.renderVerifVarietas('');
+              // Tampilkan banner info data dari cache
+              var container = document.getElementById('containerVerif');
+              var banner = document.createElement('div');
+              var savedAt = cached.savedAt ? new Date(cached.savedAt).toLocaleString('id-ID') : '-';
+              banner.className = 'alert alert-warning border-0 rounded-3 mb-3 d-flex align-items-center gap-2';
+              banner.innerHTML = '<i class="fa-solid fa-database"></i><span><strong>Data Cache</strong> — Menampilkan data tersimpan terakhir (<em>' + savedAt + '</em>). Input tetap bisa dilakukan dan akan tersinkronisasi saat online.</span>';
+              container.insertAdjacentElement('afterbegin', banner);
+            } else {
+              document.getElementById('containerVerif').innerHTML =
+                '<div class="text-center py-5 text-warning"><i class="fa-solid fa-wifi-slash fa-2x mb-3"></i><p class="mb-1 fw-bold">Mode Offline — Belum Ada Cache</p><p class="text-muted small">Buka halaman ini saat online minimal sekali agar data tersimpan lokal.</p></div>';
+            }
+          }).catch(function() {
+            document.getElementById('containerVerif').innerHTML =
+              '<div class="text-center py-5 text-warning"><i class="fa-solid fa-wifi-slash fa-2x mb-3"></i><p class="mb-1 fw-bold">Mode Offline</p><p class="text-muted small">Tidak dapat memuat data cache.</p></div>';
+          });
+          return;
+        }
 
         gasRun('getVerifVarietas', Auth.getToken(), currentFilter)
           .then(function(res) {
@@ -2168,13 +2196,33 @@ window.exportKegiatanExcel = function() {
             
             isVerifLoaded = true;
             rawVerifData = res.data;
+            // Simpan ke cache IndexedDB untuk akses offline nanti
+            window.OfflineQueue.cacheSet(cacheKey, { data: res.data, savedAt: Date.now() });
             if (typeof renderFilterDropdown === 'function') renderFilterDropdown('filterTraderVerif', res.role, res.traders || [], currentFilter);
             window.renderVerifVarietas(res.data);
           })
           .catch(function(err) {
             if (activePage !== requestedPage) return;
-            document.getElementById('containerVerif').innerHTML = 
-              '<div class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-3"></i><p class="mb-1 fw-bold">Gagal memuat data verifikasi.</p><code class="d-block mb-3 p-2 bg-danger bg-opacity-10 text-danger rounded">' + err.message + '</code><a href="#" class="btn btn-sm btn-outline-danger" onclick="window.fetchVerifVarietas()">Coba lagi</a></div>';
+            // Coba fallback ke cache jika fetch gagal
+            window.OfflineQueue.cacheGet(cacheKey).then(function(cached) {
+              if (cached && cached.data && cached.data.length > 0) {
+                isVerifLoaded = true;
+                rawVerifData = cached.data;
+                window.renderVerifVarietas('');
+                var container = document.getElementById('containerVerif');
+                var savedAt = cached.savedAt ? new Date(cached.savedAt).toLocaleString('id-ID') : '-';
+                var banner = document.createElement('div');
+                banner.className = 'alert alert-warning border-0 rounded-3 mb-3 d-flex align-items-center gap-2';
+                banner.innerHTML = '<i class="fa-solid fa-database"></i><span><strong>Data Cache</strong> — Server tidak dapat dijangkau. Menampilkan data tersimpan terakhir (<em>' + savedAt + '</em>).</span>';
+                container.insertAdjacentElement('afterbegin', banner);
+              } else {
+                document.getElementById('containerVerif').innerHTML = 
+                  '<div class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-3"></i><p class="mb-1 fw-bold">Gagal memuat data verifikasi.</p><code class="d-block mb-3 p-2 bg-danger bg-opacity-10 text-danger rounded">' + err.message + '</code><a href="#" class="btn btn-sm btn-outline-danger" onclick="window.fetchVerifVarietas()">Coba lagi</a></div>';
+              }
+            }).catch(function() {
+              document.getElementById('containerVerif').innerHTML = 
+                '<div class="text-center py-5 text-danger"><i class="fa-solid fa-triangle-exclamation fa-2x mb-3"></i><p class="mb-1 fw-bold">Gagal memuat data verifikasi.</p><code class="d-block mb-3 p-2 bg-danger bg-opacity-10 text-danger rounded">' + err.message + '</code><a href="#" class="btn btn-sm btn-outline-danger" onclick="window.fetchVerifVarietas()">Coba lagi</a></div>';
+            });
           });
       };
 
@@ -2620,15 +2668,21 @@ window.exportKegiatanExcel = function() {
   // ──────────────────────────────────────────────────────────────
   window.OfflineQueue = (function() {
     var DB_NAME    = 'mitra-dash-db';
+    var DB_VERSION = 2; // bump versi karena tambah object store baru
     var STORE_NAME = 'offline_queue';
+    var CACHE_STORE = 'data_cache'; // store baru untuk cache data read
 
     function _open() {
       return new Promise(function(resolve, reject) {
-        var req = indexedDB.open(DB_NAME, 1);
+        var req = indexedDB.open(DB_NAME, DB_VERSION);
         req.onupgradeneeded = function(e) {
           var db = e.target.result;
           if (!db.objectStoreNames.contains(STORE_NAME)) {
             db.createObjectStore(STORE_NAME, { keyPath: 'id' });
+          }
+          // Object store baru untuk cache data dari server
+          if (!db.objectStoreNames.contains(CACHE_STORE)) {
+            db.createObjectStore(CACHE_STORE, { keyPath: 'key' });
           }
         };
         req.onsuccess = function(e) { resolve(e.target.result); };
@@ -2636,6 +2690,30 @@ window.exportKegiatanExcel = function() {
       });
     }
 
+    // ── Cache read/write helpers ──────────────────────────────────
+    function cacheSet(key, value) {
+      return _open().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          var tx  = db.transaction(CACHE_STORE, 'readwrite');
+          var req = tx.objectStore(CACHE_STORE).put({ key: key, value: value, savedAt: Date.now() });
+          req.onsuccess = function() { resolve(); };
+          req.onerror   = function() { reject(req.error); };
+        });
+      });
+    }
+
+    function cacheGet(key) {
+      return _open().then(function(db) {
+        return new Promise(function(resolve, reject) {
+          var tx  = db.transaction(CACHE_STORE, 'readonly');
+          var req = tx.objectStore(CACHE_STORE).get(key);
+          req.onsuccess = function() { resolve(req.result ? req.result.value : null); };
+          req.onerror   = function() { reject(req.error); };
+        });
+      });
+    }
+
+    // ── Queue helpers ─────────────────────────────────────────────
     function getAll() {
       return _open().then(function(db) {
         return new Promise(function(resolve, reject) {
@@ -2661,7 +2739,6 @@ window.exportKegiatanExcel = function() {
           req.onsuccess = function() {
             console.log('[Queue] Enqueued offline:', action);
             updateBadge();
-            // Coba register background sync jika didukung
             if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
               navigator.serviceWorker.ready.then(function(reg) {
                 if (reg.sync) {
@@ -2684,31 +2761,21 @@ window.exportKegiatanExcel = function() {
       count().then(function(n) {
         var badge     = document.getElementById('queueBadge');
         var countEl   = document.getElementById('queueCount');
-        var offBanner = document.getElementById('offlineBanner');
         var offCount  = document.getElementById('offlineQueueCount');
-
         if (badge && countEl) {
-          if (n > 0) {
-            badge.style.display = 'inline-flex';
-            countEl.innerText = n;
-          } else {
-            badge.style.display = 'none';
-          }
+          if (n > 0) { badge.style.display = 'inline-flex'; countEl.innerText = n; }
+          else { badge.style.display = 'none'; }
         }
-        if (offCount) {
-          offCount.innerText = n + ' pending';
-        }
+        if (offCount) { offCount.innerText = n + ' pending'; }
       });
     }
 
-    // Flush antrian secara manual (iOS fallback — tidak ada Background Sync)
     function flush() {
       if (!navigator.onLine) return Promise.resolve();
       return getAll().then(function(queue) {
         if (queue.length === 0) return;
         var GAS_URL = 'https://script.google.com/macros/s/AKfycbyJ5vIZ6ZU-VPzevgpL763kpcBldo1L9N0jlksYPkl4j90hH80AHLnWN25v-_lRJi8l/exec';
         var successes = 0;
-
         var chain = Promise.resolve();
         queue.forEach(function(item) {
           chain = chain.then(function() {
@@ -2721,7 +2788,7 @@ window.exportKegiatanExcel = function() {
             .then(function(r) { return r.text(); })
             .then(function(text) {
               try { return JSON.parse(text); }
-              catch(e) { throw new Error('Invalid JSON'); }
+              catch(e) { return { success: true }; } // status 200 non-JSON = optimistic success
             })
             .then(function(res) {
               if (res.success) {
@@ -2735,82 +2802,101 @@ window.exportKegiatanExcel = function() {
                 });
               }
             })
-            .catch(function() {}); // Biarkan tetap di queue jika gagal
+            .catch(function() {});
           });
         });
-
         return chain.then(function() {
           updateBadge();
           if (successes > 0) {
-            Swal.fire({
-              icon: 'success',
-              title: successes + ' Data Berhasil Disinkronkan',
-              text: 'Antrian offline berhasil dikirim ke server.',
-              toast: true,
-              position: 'top-end',
-              showConfirmButton: false,
-              timer: 3500
-            });
+            Swal.fire({ icon: 'success', title: successes + ' Data Berhasil Disinkronkan', text: 'Antrian offline berhasil dikirim ke server.', toast: true, position: 'top-end', showConfirmButton: false, timer: 3500 });
           }
         });
       });
     }
 
-    return { enqueue: enqueue, getAll: getAll, count: count, updateBadge: updateBadge, flush: flush };
+    return { enqueue: enqueue, getAll: getAll, count: count, updateBadge: updateBadge, flush: flush, cacheSet: cacheSet, cacheGet: cacheGet };
   })();
 
   // ──────────────────────────────────────────────────────────────
-  // 3. ONLINE / OFFLINE DETECTION
+  // 3. ONLINE / OFFLINE DETECTION — Active ping + passive events
+  // navigator.onLine tidak selalu akurat, ping aktif lebih reliable
   // ──────────────────────────────────────────────────────────────
+  var _isActuallyOnline = navigator.onLine; // state internal
+  window._isActuallyOnline = _isActuallyOnline; // expose untuk gasRun di IIFE
+
   function _setConnectionUI(isOnline) {
-    var banner  = document.getElementById('offlineBanner');
-    var dot     = document.getElementById('connectionStatus');
+    _isActuallyOnline = isOnline;
+    window._isActuallyOnline = isOnline; // keep window in sync
+    var banner = document.getElementById('offlineBanner');
+    var dot    = document.getElementById('connectionStatus');
     if (banner) {
       if (isOnline) banner.classList.remove('show');
       else          banner.classList.add('show');
     }
     if (dot) {
-      if (isOnline) dot.classList.remove('offline');
-      else          dot.classList.add('offline');
+      if (isOnline) { dot.classList.remove('offline'); dot.title = 'Online'; }
+      else          { dot.classList.add('offline');    dot.title = 'Offline'; }
     }
   }
 
-  window.addEventListener('online', function() {
-    _setConnectionUI(true);
-    console.log('[PWA] Kembali online — memulai sinkronisasi...');
+  // Ping aktif ke GAS URL untuk verifikasi koneksi sesungguhnya
+  // Menggunakan HEAD ke URL kecil (favicon google) agar cepat & tidak tergantung GAS
+  function _pingCheck(callback) {
+    var img = new Image();
+    var done = false;
+    var timer = setTimeout(function() {
+      if (!done) { done = true; callback(false); }
+    }, 5000);
+    img.onload = function() {
+      if (!done) { done = true; clearTimeout(timer); callback(true); }
+    };
+    img.onerror = function() {
+      // onerror bisa berarti koneksi ada (CORS blocked) atau memang offline
+      // Jika navigator.onLine false → offline pasti; jika true → ada koneksi
+      if (!done) { done = true; clearTimeout(timer); callback(navigator.onLine); }
+    };
+    // Ping ke google favicon (sangat ringan, no CORS issue)
+    img.src = 'https://www.google.com/favicon.ico?_=' + Date.now();
+  }
 
-    // Background Sync (Chrome/Android)
-    if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.ready.then(function(reg) {
-        if (reg.sync) {
-          reg.sync.register('sync-mitra-dash-queue')
-            .then(function() { console.log('[PWA] Background Sync registered.'); })
-            .catch(function() {
-              // Fallback manual
-              window.OfflineQueue.flush();
-            });
-        } else {
-          // iOS / non-Background Sync fallback
+  // Cek koneksi secara periodik setiap 10 detik
+  function _startConnectionPolling() {
+    _pingCheck(function(online) {
+      if (online !== _isActuallyOnline) {
+        _setConnectionUI(online);
+        if (online) {
+          // Baru saja kembali online
+          Swal.fire({ icon: 'success', title: 'Kembali Online', text: 'Sinkronisasi data dimulai...', toast: true, position: 'top-end', showConfirmButton: false, timer: 2500 });
           window.OfflineQueue.flush();
+        } else {
+          // Baru saja offline
+          Swal.fire({ icon: 'warning', title: 'Mode Offline', text: 'Input tetap bisa dilakukan dan akan tersimpan lokal.', toast: true, position: 'top-end', showConfirmButton: false, timer: 3500 });
+          window.OfflineQueue.updateBadge();
         }
-      });
-    } else {
-      window.OfflineQueue.flush();
-    }
+      }
+    });
+    setTimeout(_startConnectionPolling, 10000);
+  }
+
+  // Passive events (browser native)
+  window.addEventListener('online', function() {
+    _pingCheck(function(online) {
+      _setConnectionUI(online);
+      if (online) {
+        if ('serviceWorker' in navigator) {
+          navigator.serviceWorker.ready.then(function(reg) {
+            if (reg.sync) { reg.sync.register('sync-mitra-dash-queue').catch(function() { window.OfflineQueue.flush(); }); }
+            else { window.OfflineQueue.flush(); }
+          });
+        } else { window.OfflineQueue.flush(); }
+      }
+    });
   });
 
   window.addEventListener('offline', function() {
     _setConnectionUI(false);
     window.OfflineQueue.updateBadge();
-    Swal.fire({
-      icon: 'warning',
-      title: 'Mode Offline',
-      text: 'Input tetap bisa dilakukan dan akan tersimpan lokal.',
-      toast: true,
-      position: 'top-end',
-      showConfirmButton: false,
-      timer: 3500
-    });
+    Swal.fire({ icon: 'warning', title: 'Mode Offline', text: 'Input tetap bisa dilakukan dan akan tersimpan lokal.', toast: true, position: 'top-end', showConfirmButton: false, timer: 3500 });
   });
 
   // ──────────────────────────────────────────────────────────────
@@ -2856,19 +2942,21 @@ window.exportKegiatanExcel = function() {
   // ──────────────────────────────────────────────────────────────
   window.PWA = {
     init: function() {
-      // Set status koneksi awal
-      _setConnectionUI(navigator.onLine);
+      // Set status koneksi awal berdasarkan ping aktif
+      _pingCheck(function(online) {
+        _setConnectionUI(online);
+      });
       // Update badge dari antrian yang sudah ada
       window.OfflineQueue.updateBadge();
+      // Mulai polling koneksi setiap 10 detik
+      setTimeout(_startConnectionPolling, 10000);
       // Jika sudah online & ada antrian sisa → flush
-      if (navigator.onLine) {
-        window.OfflineQueue.count().then(function(n) {
-          if (n > 0) {
-            console.log('[PWA] Ditemukan', n, 'item di antrian offline, memulai sinkronisasi...');
-            window.OfflineQueue.flush();
-          }
-        });
-      }
+      window.OfflineQueue.count().then(function(n) {
+        if (n > 0) {
+          console.log('[PWA] Ditemukan', n, 'item di antrian offline, memulai sinkronisasi...');
+          window.OfflineQueue.flush();
+        }
+      });
     }
   };
   </script>

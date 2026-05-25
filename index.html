@@ -729,22 +729,24 @@
       function gasRun(funcName) {
         var args = Array.prototype.slice.call(arguments, 1);
         return new Promise(function(resolve, reject) {
-          // Jika offline dan bukan action read-only → masuk antrian
-          if (!navigator.onLine && _isWriteAction(funcName)) {
-            window.OfflineQueue.enqueue(funcName, args)
-              .then(function() {
-                resolve({ success: true, _queued: true, message: 'Data tersimpan offline, akan disinkronkan saat online.' });
-              })
-              .catch(reject);
+
+          // Jika benar-benar offline → langsung queue (write) atau reject (read)
+          if (!navigator.onLine) {
+            if (_isWriteAction(funcName)) {
+              window.OfflineQueue.enqueue(funcName, args)
+                .then(function() {
+                  resolve({ success: true, _queued: true, message: 'Data tersimpan offline, akan disinkronkan saat online.' });
+                })
+                .catch(reject);
+            } else {
+              reject(new Error('Tidak ada koneksi internet.'));
+            }
             return;
           }
 
           var controller = new AbortController();
           var timeout = setTimeout(function() { controller.abort(); }, 25000);
 
-          // ✅ FIX CORS: GAS hanya menerima simple request tanpa preflight.
-          // Gunakan Content-Type: text/plain agar browser TIDAK mengirim
-          // preflight OPTIONS request yang diblokir GAS.
           fetch(GAS_URL, {
             method: 'POST',
             headers: { 'Content-Type': 'text/plain;charset=utf-8' },
@@ -754,7 +756,6 @@
           })
           .then(function(response) {
             clearTimeout(timeout);
-            // GAS kadang redirect sebelum response — ikuti redirect
             if (!response.ok) throw new Error('HTTP ' + response.status);
             return response.text();
           })
@@ -768,14 +769,22 @@
           .then(resolve)
           .catch(function(err) {
             clearTimeout(timeout);
-            // Jika koneksi terputus saat request write → queue
-            if (_isWriteAction(funcName) && (err.name === 'AbortError' || !navigator.onLine)) {
+
+            // ✅ FIX UTAMA: Apapun error fetch (Failed to fetch, timeout, CORS)
+            // → jika write action, masuk queue. Jangan tampilkan error ke user.
+            if (_isWriteAction(funcName)) {
+              console.warn('[gasRun] Fetch gagal untuk write action, masuk queue:', funcName, err.message);
               window.OfflineQueue.enqueue(funcName, args)
                 .then(function() {
-                  resolve({ success: true, _queued: true, message: 'Koneksi terputus. Data disimpan lokal.' });
+                  resolve({
+                    success: true,
+                    _queued: true,
+                    message: 'Koneksi ke server gagal. Data disimpan lokal dan akan dikirim otomatis.'
+                  });
                 })
                 .catch(reject);
             } else {
+              // Read action gagal → lempar error agar UI bisa tampilkan "Coba lagi"
               reject(err);
             }
           });
@@ -2480,8 +2489,8 @@ window.exportKegiatanExcel = function() {
                   if (res._queued) {
                     Swal.fire({
                       icon: 'warning',
-                      title: 'Tersimpan Offline',
-                      html: 'Data verifikasi disimpan di perangkat.<br><small class="text-muted">Akan dikirim ke server saat online kembali.</small>',
+                      title: 'Tersimpan di Perangkat',
+                      html: 'Server tidak dapat dijangkau saat ini.<br><small class="text-muted">Data verifikasi tersimpan lokal dan akan <strong>dikirim otomatis</strong> saat koneksi kembali normal.</small>',
                       confirmButtonText: 'OK'
                     });
                   } else {
